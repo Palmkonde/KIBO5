@@ -222,8 +222,8 @@ public class YourService extends KiboRpcService {
         nowKIBO = api.getRobotKinematics().getPosition();
         Log.i(TAG, "KIBO position: " + nowKIBO.getX() + " " + nowKIBO.getY() + " " + nowKIBO.getZ());
         for(int i=0;i<6;i++){
-            if(doesLineIntersectBox(new LineSegment(new Point3D(nowKIBO.getX(),nowKIBO.getY(),nowKIBO.getZ()),
-                    new Point3D(10.30d,-6.853d,4.945d)),KOZ[i])) {
+            if(isIntersectingBox(new Point3D(nowKIBO.getX(),nowKIBO.getY(),nowKIBO.getZ()),
+                    new Point3D(10.30d,-6.853d,4.945d),KOZ[i])) {
                 Log.i(TAG, "runPlan1: Intersect with KOZ {" + i + "}");
             }
         }
@@ -258,6 +258,22 @@ public class YourService extends KiboRpcService {
             r = api.moveTo(p,q, true);
             cnt++;
         }
+    }
+
+    public boolean isIntersectingBox(Point3D p1, Point3D p2, Box rectangle) {
+        Point3D minPoint = rectangle.min;
+        Point3D maxPoint = rectangle.max;
+
+        double x1 = p1.x, y1 = p1.y, z1 = p1.z;
+        double x2 = p2.x, y2 = p2.y, z2 = p2.z;
+
+        // Check if the line segment intersects the box in any dimension
+        boolean intersectX = (Math.min(x1, x2) <= maxPoint.x && Math.max(x1, x2) >= minPoint.x);
+        boolean intersectY = (Math.min(y1, y2) <= maxPoint.y && Math.max(y1, y2) >= minPoint.y);
+        boolean intersectZ = (Math.min(z1, z2) <= maxPoint.z && Math.max(z1, z2) >= minPoint.z);
+
+        // If the line segment intersects the box in all three dimensions, it intersects the box
+        return intersectX && intersectY && intersectZ;
     }
 
     public boolean doesLineIntersectBox(LineSegment line, Box box) {
@@ -336,7 +352,7 @@ public class YourService extends KiboRpcService {
         // check if can go
         boolean canGo = true;
         for(Box box:KOZ) {
-            if(doesLineIntersectBox(new LineSegment(start,end),box)) {
+            if(isIntersectingBox(start,end,box)) {
                 canGo = false;
             }
         }
@@ -413,7 +429,7 @@ public class YourService extends KiboRpcService {
         Point3D ref = conPath.get(0);
         for(int i=1;i<conPath.size();i++) {
             for(Box box:KOZ) {
-                if (doesLineIntersectBox(new LineSegment(ref, conPath.get(i)), box)) {
+                if (isIntersectingBox(ref,conPath.get(i),box)) {
                     ref = conPath.get(i - 1);
                     path.add(new Point(ref.x, ref.y, ref.z));
                     break;
