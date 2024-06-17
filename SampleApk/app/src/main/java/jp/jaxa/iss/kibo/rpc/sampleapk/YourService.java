@@ -11,12 +11,16 @@ import jp.jaxa.iss.kibo.rpc.api.areas.AreaInfo;
 
 import org.opencv.core.Mat;
 
+import java.lang.reflect.Parameter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -43,10 +47,10 @@ public class YourService extends KiboRpcService {
                     new Point3D(10.7d, -8.45d, 4.97d)),
 
             new Box(new Point3D(10.76d, -7.40d, 4.27d), // x - 0.05
-                    new Point3D(11.6d, -7.35d, 5.02d)), // z + 0.05
+                    new Point3D(11.6d, -7.30d, 5.02d)), // z + 0.05, y + 0.05
 
             new Box(new Point3D(10.25d, -7.40d, 4.92d), // z - 0.05
-                    new Point3D(10.92d, -7.35d, 5.62d)) // x + 0.05
+                    new Point3D(10.92d, -7.30d, 5.62d)) // x + 0.05, y + 0.05
     };
 
     final double directions[][] = {
@@ -59,32 +63,34 @@ public class YourService extends KiboRpcService {
     };
 
 
-    static class Pair {
+    static class Pair implements Comparable<Pair> {
         double dist;
         Point3D node;
 
-        Pair()
-        {
-            this.dist = 0d;
-            this.node = null;
-        }
-
-        Pair(double x, Point3D y)
-        {
-            this.dist = 0d;
-            this.node = y;
+        Pair(double dist, Point3D node) {
+            this.dist = dist;
+            this.node = node;
         }
 
         @Override
-        public String toString()
-        {
+        public int compareTo(Pair other) {
+            return Double.compare(this.dist, other.dist);
+        }
+
+        @Override
+        public String toString() {
             return this.dist + "," + this.node;
         }
     }
 
     static class PQ {
-        Pair[] Tree = new Pair[1005];
-        private int Tsize = 0;
+        private static final int INITIAL_CAPACITY = 1005;
+        Pair[] Tree;
+        int Tsize = 0;
+
+        PQ() {
+            Tree = new Pair[INITIAL_CAPACITY];
+        }
 
         void push(double dist, Point3D u)
         {
@@ -107,6 +113,8 @@ public class YourService extends KiboRpcService {
 
         void pop()
         {
+            if (Tsize == 0) throw new NoSuchElementException("Priority queue is empty");
+
             int node = 0,c;
             Tree[node] = Tree[--Tsize];
 
@@ -124,7 +132,10 @@ public class YourService extends KiboRpcService {
             Tree[node] = tmp;
         }
 
-        Pair top() { return Tree[0]; }
+        Pair top() {
+            if (Tsize == 0) throw new NoSuchElementException("Priority queue is empty");
+            return Tree[0];
+        }
         boolean empty()
         {
             return (Tsize == 0);
@@ -180,22 +191,17 @@ public class YourService extends KiboRpcService {
         api.startMission();
         Log.i(TAG, "Start Mission");
 
-        Kinematics KIBO = api.getRobotKinematics();
-
         // 10.95 -10.19-0.03 5.2 <-- plate area 1
         move(10.95d,-10.16d,5.2d,0,0,-1f,1f);
 
         Mat saveImage = api.getMatNavCam();
         api.saveMatImage(saveImage, "Test1.jpg");
 
-        Point nowKIBO = KIBO.getPosition();
-
-        // midPoint
-        List<Point3D> path = rerouteLine(new LineSegment(new Point3D(nowKIBO.getX(),nowKIBO.getY(),nowKIBO.getZ()),
-                                                         new Point3D(10.93d,-8.88d,4.8d)),
-                                                         KOZ);
-        for(Point3D p : path) {
-            move(p.x,p.y,p.z,0f,1f,0f,1f);
+        // moving point
+        Point nowKIBO = api.getRobotKinematics().getPosition();
+        List<Point> Apath = Astar(nowKIBO,new Point(10.93d,-8.88d,4.8d));
+        for (Point p:Apath){
+            move(p.getX(),p.getY(),p.getZ(),0f,1f,0f,1f);
         }
 
         //10.93 -8.88 4.33+0.03 <-- plate area 2
@@ -204,12 +210,10 @@ public class YourService extends KiboRpcService {
         saveImage = api.getMatNavCam();
         api.saveMatImage(saveImage, "Test2.jpg");
 
-        // midPoint
-        path = rerouteLine(new LineSegment(new Point3D(nowKIBO.getX(),nowKIBO.getY(),nowKIBO.getZ()),
-                        new Point3D(10.925d,-7.925d,4.8d)),
-                KOZ);
-        for(Point3D p : path) {
-            move(p.x,p.y,p.z,0f,1f,0f,1f);
+        nowKIBO = api.getRobotKinematics().getPosition();
+        Apath = Astar(nowKIBO, new Point(10.925d,-7.925d,4.8d));
+        for(Point p:Apath){
+            move(p.getX(),p.getY(),p.getZ(), 0f, 1f, 0f, 1f);
         }
 
         // plate area 3
@@ -220,21 +224,14 @@ public class YourService extends KiboRpcService {
 
         //Astar Try hard T^T
         nowKIBO = api.getRobotKinematics().getPosition();
-        Log.i(TAG, "KIBO position: " + nowKIBO.getX() + " " + nowKIBO.getY() + " " + nowKIBO.getZ());
-        for(int i=0;i<6;i++){
-            if(isIntersectingBox(new Point3D(nowKIBO.getX(),nowKIBO.getY(),nowKIBO.getZ()),
-                    new Point3D(10.30d,-6.853d,4.945d),KOZ[i])) {
-                Log.i(TAG, "runPlan1: Intersect with KOZ {" + i + "}");
-            }
-        }
         List<Point> pathAstar = Astar(nowKIBO,new Point(10.30d,-6.853d,4.945d));
         for(Point p : pathAstar) {
             Log.i(TAG, "Astar go to: " + p.getX() + " " + p.getY() + " " + p.getZ());
-            move(p.getX(),p.getY(),p.getZ(),0f,0f,1f,-1f);
+            move(p.getX(),p.getY(),p.getZ(),0f,0f,1f,0f);
         }
 
         // plate area 4
-        move(10.30d,-6.853d,4.945d,0f,0f,1f,-1f);
+        move(10.30d,-6.853d,4.945d,0f,0f,1f,0f);
 
         saveImage = api.getMatNavCam();
         api.saveMatImage(saveImage, "Test4.jpg");
@@ -368,16 +365,24 @@ public class YourService extends KiboRpcService {
         HashMap<Point3D, Double> dis = new HashMap<>();
         HashMap<Point3D, Point3D> cameFrom = new HashMap<>();
 
-        PQ pq = new PQ();
-        pq.push(0 ,start);
+        PriorityQueue<Pair> pq = new PriorityQueue<>();
+        pq.add(new Pair(0,start));
         dis.put(start,0d);
 
-        while(!pq.empty()) {
-            double nowDist = pq.top().dist;
-            Point3D nowNode = pq.top().node;
-            pq.pop();
+        while(!pq.isEmpty()) {
+            Pair topPair = pq.poll();
+            double nowDist = topPair.dist;
+            Point3D nowNode = topPair.node;
 
-            if(nowNode.equals(end)) {
+            boolean isValid = true;
+            for(Box box : KOZ) {
+                if(isIntersectingBox(nowNode,end,box)) {
+                    isValid = false;
+                    break;
+                }
+            }
+            if(isValid){
+                cameFrom.put(end,nowNode);
                 break;
             }
 
@@ -394,9 +399,9 @@ public class YourService extends KiboRpcService {
 
                 if(!isPointInBox(neighbor,KIZ)) continue;
 
-                boolean isValid = true;
+                isValid = true;
                 for(Box box:KOZ) {
-                    if(isPointInBox(neighbor,box)) {
+                    if(isIntersectingBox(nowNode,neighbor,box)) {
                         isValid = false;
                         break;
                     }
@@ -409,7 +414,7 @@ public class YourService extends KiboRpcService {
 
                 if(dis.getOrDefault(neighbor, Double.MAX_VALUE) > newDist) {
                     dis.put(neighbor,newDist);
-                    pq.push(fCost,neighbor);
+                    pq.add(new Pair(fCost,neighbor));
                     cameFrom.put(neighbor,nowNode);
                 }
             }
@@ -417,7 +422,7 @@ public class YourService extends KiboRpcService {
 
         // List path
         List<Point3D> conPath = new ArrayList<Point3D>();
-        Point3D current = start;
+        Point3D current = end;
 
         while(current != null) {
             conPath.add(current);
