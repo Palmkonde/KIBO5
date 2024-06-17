@@ -46,7 +46,7 @@ public class YourService extends KiboRpcService {
             new Box(new Point3D(10.25d, -8.5d, 4.27d),
                     new Point3D(10.7d, -8.45d, 4.97d)),
 
-            new Box(new Point3D(10.76d, -7.40d, 4.27d), // x - 0.05
+            new Box(new Point3D(10.72d, -7.40d, 4.27d), // x - 0.15
                     new Point3D(11.6d, -7.30d, 5.02d)), // z + 0.05, y + 0.05
 
             new Box(new Point3D(10.25d, -7.40d, 4.92d), // z - 0.05
