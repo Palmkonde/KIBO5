@@ -1,19 +1,28 @@
 package jp.jaxa.iss.kibo.rpc.sampleapk;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.util.Log;
 
-import gov.nasa.arc.astrobee.Kinematics;
 import gov.nasa.arc.astrobee.Result;
 import gov.nasa.arc.astrobee.types.Point;
 import gov.nasa.arc.astrobee.types.Quaternion;
 import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
-import jp.jaxa.iss.kibo.rpc.api.areas.AreaInfo;
 
+import org.opencv.android.Utils;
+import org.opencv.aruco.Aruco;
+import org.opencv.aruco.Dictionary;
+import org.opencv.calib3d.Calib3d;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
+import org.opencv.ximgproc.Ximgproc;
 
-import java.lang.reflect.Parameter;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,10 +56,10 @@ public class YourService extends KiboRpcService {
                     new Point3D(10.7d, -8.45d, 4.97d)),
 
             new Box(new Point3D(10.72d, -7.40d, 4.27d), // x - 0.15
-                    new Point3D(11.6d, -7.30d, 5.02d)), // z + 0.05, y + 0.05
+                    new Point3D(11.6d, -7.35d, 5.02d)), // z + 0.05
 
             new Box(new Point3D(10.25d, -7.40d, 4.92d), // z - 0.05
-                    new Point3D(10.92d, -7.30d, 5.62d)) // x + 0.05, y + 0.05
+                    new Point3D(10.92d, -7.35d, 5.62d)) // x + 0.05
     };
 
     final double directions[][] = {
@@ -62,6 +71,38 @@ public class YourService extends KiboRpcService {
             {0.0,0.0,-0.01d}
     };
 
+    final Point AREA[] = {
+            new Point(10.95d,-10.16d,5.2d),
+            new Point(10.93d, -8.88d, 4.8d),
+            new Point(10.925d,-7.925d,4.8d),
+            new Point(10.4d,-6.853d,4.945d)
+    };
+
+    private final String[] TEMPLATE_NAME = {
+            "beaker",
+            "goggle",
+            "hammer",
+            "kapton_tape",
+            "pipette",
+            "screwdriver",
+            "thermometer",
+            "top",
+            "watch",
+            "wrench"
+    };
+
+    private final String[] TEMPLATE_FILENAME = {
+            "beaker.png",
+            "goggle.png",
+            "hammer.png",
+            "kapton_tape.png",
+            "pipette.png",
+            "screwdriver.png",
+            "thermometer.png",
+            "top.png",
+            "watch.png",
+            "wrench.png"
+    };
 
     static class Pair implements Comparable<Pair> {
         double dist;
@@ -197,6 +238,8 @@ public class YourService extends KiboRpcService {
         Mat saveImage = api.getMatNavCam();
         api.saveMatImage(saveImage, "Test1.jpg");
 
+        detectImage(saveImage,1);
+
         // moving point
         Point nowKIBO = api.getRobotKinematics().getPosition();
         List<Point> Apath = Astar(nowKIBO,new Point(10.93d,-8.88d,4.8d));
@@ -231,10 +274,14 @@ public class YourService extends KiboRpcService {
         }
 
         // plate area 4
-        move(10.30d,-6.853d,4.945d,0f,0f,1f,0f);
+        move(10.4d,-6.853d,4.945d,0f,0f,1f,0f);
 
         saveImage = api.getMatNavCam();
         api.saveMatImage(saveImage, "Test4.jpg");
+
+        // astronuat 11.143, -6.7607, 4.9654,  qua: 0 0 0.707 0.707
+        move(11.143d,-6.7607d,4.9654d,0f,0f,0.707f,0.707f);
+
 
         api.shutdownFactory();
         System.exit(0);
@@ -446,5 +493,172 @@ public class YourService extends KiboRpcService {
 
     private double distance (Point3D p, Point3D other) {
         return Math.sqrt(Math.pow(p.x - other.x,2) + Math.pow(p.y-other.y,2) + Math.pow(p.z-other.z,2));
+    }
+
+    private Mat resizeImg (Mat img, int width) {
+        int height = (int) (img.rows() * ((double) width / img.cols()));
+        Mat resizeedImg = new Mat();
+        Imgproc.resize(img, resizeedImg, new Size(width, height));
+
+        return resizeedImg;
+    }
+
+    private Mat rotImg (Mat img, int angle) {
+        org.opencv.core.Point center = new org.opencv.core.Point(img.cols()/2.0, img.rows()/2.0);
+        Mat rotatedMat =  Imgproc.getRotationMatrix2D(center,angle,1.0);
+        Mat rotatedImg = new Mat();
+        Imgproc.warpAffine(img, rotatedImg, rotatedMat, img.size());
+
+        return rotatedImg;
+    }
+
+    private static List<org.opencv.core.Point> removeDuplicates(List<org.opencv.core.Point> points) {
+        double lenght = 10; //widht 10 px
+        List<org.opencv.core.Point> filteredlist = new ArrayList<>();
+
+        // rempve multiple detections
+        for(org.opencv.core.Point point: points) {
+            boolean isInclude = false;
+            for(org.opencv.core.Point checkPoint : filteredlist) {
+                double distance = calculateDistance(point, checkPoint);
+
+                if(distance <= lenght){
+                    isInclude = true;
+                    break;
+                }
+            }
+
+            if(!isInclude){
+                filteredlist.add(point);
+            }
+        }
+        return filteredlist;
+    }
+
+    private static double calculateDistance(org.opencv.core.Point p1, org.opencv.core.Point p2){
+        double dx = p1.x - p2.x;
+        double dy = p1.y - p2.y;
+        return Math.sqrt(Math.pow(dx,2) + Math.pow(dy,2));
+    }
+
+    private int getMaxIndex(int[] array) {
+        int max = 0;
+        int maxIndex = 0;
+
+        for(int i=0;i<array.length;i++) {
+            if(array[i] > max){
+                max = array[i];
+                maxIndex = i;
+            }
+        }
+        return maxIndex;
+    }
+
+    private void detectImage(Mat image, int area){
+
+        //Dectect AR
+        Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
+        List<Mat> corners = new ArrayList<>();
+        Mat markerIds = new Mat();
+        Aruco.detectMarkers(image, dictionary, corners, markerIds); // We can know the position of the Item in the picture
+
+        // Streching the image
+        //Get camera matrix
+        Mat cameraMatrix = new Mat(3,3, CvType.CV_64F);
+        cameraMatrix.put(3,3,api.getNavCamIntrinsics()[0]);
+        Mat cameraCoefficients = new Mat(1,5,CvType.CV_64F);
+        cameraCoefficients.put(0,0,api.getNavCamIntrinsics()[1]);
+        cameraCoefficients.convertTo(cameraCoefficients, CvType.CV_64F);
+
+        //Undistort image
+        Mat undistortImg = new Mat();
+        Calib3d.fisheye_undistortImage(image, undistortImg, cameraMatrix, cameraCoefficients);
+
+        //Pattern matching
+        //Load template images
+        Mat[] templates = new Mat[TEMPLATE_FILENAME.length];
+        for(int i=0;i< TEMPLATE_FILENAME.length;i++) {
+            try{
+                //open the template image file in the Bitmap from the file name and convert to Mat
+                InputStream inputStream = getAssets().open(TEMPLATE_FILENAME[i]);
+                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                Mat mat = new Mat();
+                Utils.bitmapToMat(bitmap,mat);
+
+                //convert to grayscale
+                Imgproc.cvtColor(mat,mat, Imgproc.COLOR_BGR2GRAY);
+
+                //Assign to an array of templates
+                templates[i] = mat;
+                inputStream.close();
+
+            }
+            catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        //Number of matches for each template
+        int templateMatchCnt[] = new int[10];
+
+        // Get the number of template matches
+        for(int tempNum = 0; tempNum < templates.length; tempNum++) {
+            // Number of matches
+            int matchCnt = 0;
+            // coordinates of the matched location
+            List<org.opencv.core.Point> matches = new ArrayList<>();
+
+            // loading template image and target image
+            Mat template = templates[tempNum].clone();
+            Mat targetImage = undistortImg.clone();
+
+            //Pattern matching **px**
+            int widthMin = 20;
+            int widthMax = 100;
+            int changeWidth = 5;
+            int changeAngle = 45;
+
+            for (int i = widthMin; i <= widthMax; i+= changeWidth) {
+                for (int j=0; j<=360; j+= changeAngle) {
+                    Mat resizedTemp = resizeImg(template, i);
+                    Mat rotResizedTemp = rotImg(resizedTemp, j);
+
+                    Mat result = new Mat();
+                    Imgproc.matchTemplate(targetImage, rotResizedTemp, result, Imgproc.TM_CCOEFF_NORMED);
+
+                    //Get coordinates with similarity greater than or equal to the treshold
+                    double threshold = 0.8;
+                    Core.MinMaxLocResult mmlr = Core.minMaxLoc(result);
+                    double maxVal = mmlr.maxVal;
+
+                    if(maxVal >= threshold) {
+                        // extract only results grater than or equal to the threshold
+                        Mat thresholdedResult = new Mat();
+                        Imgproc.threshold(result, thresholdedResult, threshold, 1.0, Imgproc.THRESH_TOZERO);
+
+                        //Get Match counts
+                        for(int y=0; y< thresholdedResult.rows();y++) {
+                            for(int x=0;x<thresholdedResult.cols();x++){
+                                if(thresholdedResult.get(y,x)[0] > 0){
+                                    matches.add(new org.opencv.core.Point(x,y));
+                                }
+                            }
+                        }
+                    }
+                }
+                // Avoidling detecting the same location multiple times
+                List<org.opencv.core.Point> filteredMatches=removeDuplicates(matches);
+                matchCnt += filteredMatches.size();
+
+                //Number of matches for each template
+                templateMatchCnt[tempNum] = matchCnt;
+            }
+        }
+
+        //When you recognize items, let's set the type and number.
+        int mostMatchTemplateNum = getMaxIndex(templateMatchCnt);
+        api.setAreaInfo(area,TEMPLATE_NAME[mostMatchTemplateNum], templateMatchCnt[mostMatchTemplateNum]);
+
+        return;
     }
 }
