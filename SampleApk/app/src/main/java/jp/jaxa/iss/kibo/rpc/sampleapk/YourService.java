@@ -18,7 +18,6 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
-import org.opencv.ximgproc.Ximgproc;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -124,65 +123,6 @@ public class YourService extends KiboRpcService {
         }
     }
 
-    static class PQ {
-        private static final int INITIAL_CAPACITY = 1005;
-        Pair[] Tree;
-        int Tsize = 0;
-
-        PQ() {
-            Tree = new Pair[INITIAL_CAPACITY];
-        }
-
-        void push(double dist, Point3D u)
-        {
-            Tree[Tsize++] = new Pair(dist,u);
-
-            int node = Tsize-1;
-            Pair tmp = Tree[node];
-
-            while(node > 0)
-            {
-                int p = (node-1)/2;
-
-                if(tmp.dist >= Tree[p].dist) break;
-
-                Tree[node] = Tree[p];
-                node = p;
-            }
-            Tree[node] = tmp;
-        }
-
-        void pop()
-        {
-            if (Tsize == 0) throw new NoSuchElementException("Priority queue is empty");
-
-            int node = 0,c;
-            Tree[node] = Tree[--Tsize];
-
-            Pair tmp = Tree[node];
-
-            while((c = 2*node+1) < Tsize)
-            {
-                if(c + 1 < Tsize && (Tree[c].dist < Tree[c+1].dist)) c++;
-
-                if(Tree[c].dist >= tmp.dist) break;
-
-                Tree[node] = Tree[c];
-                node = c;
-            }
-            Tree[node] = tmp;
-        }
-
-        Pair top() {
-            if (Tsize == 0) throw new NoSuchElementException("Priority queue is empty");
-            return Tree[0];
-        }
-        boolean empty()
-        {
-            return (Tsize == 0);
-        }
-    }
-
     static class Point3D {
         double x, y, z;
 
@@ -214,16 +154,6 @@ public class YourService extends KiboRpcService {
         Box(Point3D min, Point3D max) {
             this.min = min;
             this.max = max;
-        }
-    }
-
-    // Helper class to represent a line segment
-    static class LineSegment {
-        Point3D start, end;
-
-        LineSegment(Point3D start, Point3D end) {
-            this.start = start;
-            this.end = end;
         }
     }
 
@@ -318,64 +248,6 @@ public class YourService extends KiboRpcService {
 
         // If the line segment intersects the box in all three dimensions, it intersects the box
         return intersectX && intersectY && intersectZ;
-    }
-
-    public boolean doesLineIntersectBox(LineSegment line, Box box) {
-        // Calculate intersection points
-        for (int i = 0; i < 3; i++) {
-            double minCoord = (i == 0) ? box.min.x : (i == 1) ? box.min.y : box.min.z;
-            double maxCoord = (i == 0) ? box.max.x : (i == 1) ? box.max.y : box.max.z;
-
-            Point3D entry = getIntersection(line.start, line.end, minCoord, i);
-            Point3D exit = getIntersection(line.start, line.end, maxCoord, i);
-
-            if (isPointInBox(entry, box) || isPointInBox(exit, box)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public List<Point3D> rerouteLine(LineSegment line, Box[] boxes) {
-        List<Point3D> path = new ArrayList<>();
-
-        String fr = line.start.x + ", " + line.start.y + ", " + line.start.z;
-        String to = line.end.x + ", " + line.end.y+ ", " + line.end.z;
-        Log.i(TAG, "rerouteAroundBox: from " + fr + " to " + to);
-
-        for (Box box : boxes) {
-            if (doesLineIntersectBox(line, box)) {
-                // Calculate midpoint
-                Point3D midpoint = new Point3D(
-                        (line.start.x + line.end.x) / 2,
-                        (line.start.y + line.end.y) / 2,
-                        (line.start.z + line.end.z) / 2
-                );
-
-                // Split the line into two segments via the midpoint
-                LineSegment firstSegment = new LineSegment(line.start, midpoint);
-                LineSegment secondSegment = new LineSegment(midpoint, line.end);
-
-                // Add rerouted segments to the path
-                path.add(midpoint);
-                path.add(line.end);
-                return path; // Assuming single box intersection for simplicity
-            }
-        }
-        path.add(line.end);
-        return path;
-    }
-
-    private static Point3D getIntersection(Point3D start, Point3D end, double coord, int axis) {
-        double t = (coord - (axis == 0 ? start.x : axis == 1 ? start.y : start.z)) /
-                ((axis == 0 ? end.x : axis == 1 ? end.y : end.z) -
-                        (axis == 0 ? start.x : axis == 1 ? start.y : start.z));
-        return new Point3D(
-                start.x + t * (end.x - start.x),
-                start.y + t * (end.y - start.y),
-                start.z + t * (end.z - start.z)
-        );
     }
 
     private static boolean isPointInBox(Point3D point, Box box) {
@@ -573,6 +445,7 @@ public class YourService extends KiboRpcService {
         //Undistort image
         Mat undistortImg = new Mat();
         Calib3d.fisheye_undistortImage(image, undistortImg, cameraMatrix, cameraCoefficients);
+
 
         //Pattern matching
         //Load template images
